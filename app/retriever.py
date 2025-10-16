@@ -21,6 +21,8 @@ from dataclasses import dataclass
 from enum import Enum
 import numpy as np
 import os
+import socket
+from urllib.parse import urlparse, urlunparse
 
 # ============================================================================
 # CONFIGURATION
@@ -86,7 +88,24 @@ class SparkiiRetriever:
 
         # Connect to database
         print("🔄 Connecting to Supabase...")
-        self.conn = psycopg.connect(SUPABASE_URL)
+        # Force IPv4 to avoid IPv6 connectivity issues on Railway
+        parsed_url = urlparse(SUPABASE_URL)
+        hostname = parsed_url.hostname
+
+        # Resolve hostname to IPv4 address only
+        try:
+            ipv4_addr = socket.getaddrinfo(hostname, None, socket.AF_INET)[0][4][0]
+            print(f"🌐 Resolved {hostname} to IPv4: {ipv4_addr}")
+
+            # Rebuild URL with IPv4 address
+            netloc = f"{parsed_url.username}:{parsed_url.password}@{ipv4_addr}:{parsed_url.port}"
+            ipv4_url = urlunparse((parsed_url.scheme, netloc, parsed_url.path,
+                                  parsed_url.params, parsed_url.query, parsed_url.fragment))
+            self.conn = psycopg.connect(ipv4_url)
+        except socket.gaierror as e:
+            print(f"⚠️  IPv4 resolution failed, trying original URL: {e}")
+            self.conn = psycopg.connect(SUPABASE_URL)
+
         print("✅ Connected to Supabase")
 
     def encode_query(self, query: str) -> List[float]:

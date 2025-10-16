@@ -264,7 +264,7 @@ Content: {r['content'][:1000]}
 
         # Generate answer using OpenRouter (Claude 4.5 Haiku)
         response = openrouter_client.chat.completions.create(
-            model="anthropic/claude-3.5-haiku-20250116",  # Latest Claude 4.5 Haiku
+            model="anthropic/claude-haiku-4.5",  # Latest Claude 4.5 Haiku
             messages=[
                 {
                     "role": "system",

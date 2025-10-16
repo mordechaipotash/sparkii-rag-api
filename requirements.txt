@@ -1,29 +1,28 @@
 ## ==================================================================
-# SPARKII RAG: Python Dependencies
-# =================================================================
+# SPARKII RAG: Python Dependencies (Railway Optimized)
+# ==================================================================
+# CPU-only PyTorch for 75% size reduction (888MB → 200MB)
+--index-url https://download.pytorch.org/whl/cpu
+--extra-index-url https://pypi.org/simple
 
-# Core dependencies
-psycopg2-binary==2.9.9  # PostgreSQL adapter
-sentence-transformers==2.7.0  # Embedding generation
-torch>=2.5.0  # PyTorch (required by sentence-transformers) - Compatible with Python 3.13+
-tqdm==4.66.4  # Progress bars
+# Core ML dependencies
+torch>=2.5.0
+sentence-transformers==2.7.0
+numpy>=1.24.0
 
-# LangChain ecosystem
-langchain==0.2.6
-langchain-community==0.2.6
-langchain-anthropic==0.1.20
-pgvector==0.2.5  # PostgreSQL vector extension Python client
-anthropic>=0.40.0  # Anthropic Claude API
+# Database
+psycopg2-binary==2.9.9
+pgvector==0.2.5
 
-# FastAPI
-fastapi>=0.115.0  # Python 3.13 compatible
-uvicorn[standard]>=0.32.0  # Python 3.13 compatible
-pydantic>=2.10.0  # Python 3.13 compatible (pydantic-core 2.27.0+)
-pydantic-settings>=2.6.0  # Python 3.13 compatible
-python-multipart==0.0.9
+# FastAPI - Python 3.13 compatible
+fastapi>=0.115.0
+uvicorn[standard]>=0.32.0
+pydantic>=2.10.0
+pydantic-settings>=2.6.0
 
-# OpenRouter / OpenAI client
+# OpenRouter client
 openai==1.10.0
 
 # Utilities
 python-dotenv==1.0.1
+tqdm==4.66.4

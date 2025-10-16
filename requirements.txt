@@ -20,8 +20,8 @@ uvicorn[standard]>=0.32.0
 pydantic>=2.10.0
 pydantic-settings>=2.6.0
 
-# OpenRouter client
-openai==1.10.0
+# OpenRouter client - Python 3.13 compatible
+openai>=1.54.0
 
 # Utilities
 python-dotenv==1.0.1

@@ -28,13 +28,22 @@ import uvicorn
 from openai import OpenAI
 import os
 import logging
+import sys
 
 # Clean import from app package
 from app.retriever import SparkiiRetriever, RetrievalFilters, QueryType
 
 # Configure logging
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 logger = logging.getLogger(__name__)
+
+# Log startup environment
+logger.info(f"🐍 Python version: {sys.version}")
+logger.info(f"📁 Working directory: {os.getcwd()}")
+logger.info(f"📦 App module location: {__file__}")
 
 # ============================================================================
 # FASTAPI APP
@@ -121,12 +130,21 @@ class StatsResponse(BaseModel):
 async def startup():
     """Initialize retriever on startup"""
     global retriever
+    logger.info("=" * 60)
     logger.info("🚀 Starting Sparkii RAG API...")
+    logger.info(f"📊 Environment: Railway Pro (8GB RAM, 8 vCPU)")
+    logger.info(f"🔑 OpenRouter API Key: {'✅ Set' if OPENROUTER_API_KEY else '❌ Missing'}")
+    logger.info(f"🗄️  Database URL: {'✅ Set' if os.getenv('DATABASE_URL') else '❌ Missing'}")
+    logger.info("=" * 60)
+
     try:
+        logger.info("📥 Initializing SparkiiRetriever...")
         retriever = SparkiiRetriever()
         logger.info("✅ Retriever initialized successfully!")
+        logger.info(f"📊 Model loaded: sentence-transformers/all-MiniLM-L6-v2")
+        logger.info(f"🎯 Ready to serve requests!")
     except Exception as e:
-        logger.error(f"❌ Failed to initialize retriever: {e}")
+        logger.error(f"❌ Failed to initialize retriever: {e}", exc_info=True)
         raise
 
 @app.on_event("shutdown")

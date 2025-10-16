@@ -27,16 +27,21 @@ import uvicorn
 from openai import OpenAI
 import os
 
-import sys
-sys.path.insert(0, '/Users/mordechai/oct-5-2-2025/sparkii-rag')
-from typing import TYPE_CHECKING
-if TYPE_CHECKING:
-    pass
-# Import from the script file directly
+# Import from the local rag_retriever module using relative path
 import importlib.util
-spec = importlib.util.spec_from_file_location("rag_retriever", "/Users/mordechai/oct-5-2-2025/sparkii-rag/03_rag_retriever.py")
+import sys
+from pathlib import Path
+
+# Get the directory of this file for relative imports
+CURRENT_DIR = Path(__file__).parent.resolve()
+RAG_RETRIEVER_PATH = CURRENT_DIR / "03_rag_retriever.py"
+
+# Dynamically import the rag_retriever module
+spec = importlib.util.spec_from_file_location("rag_retriever", str(RAG_RETRIEVER_PATH))
 rag_retriever = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(rag_retriever)
+
+# Import the classes we need
 SparkiiRetriever = rag_retriever.SparkiiRetriever
 RetrievalFilters = rag_retriever.RetrievalFilters
 QueryType = rag_retriever.QueryType

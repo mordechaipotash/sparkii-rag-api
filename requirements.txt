@@ -10,8 +10,8 @@ torch>=2.5.0
 sentence-transformers==2.7.0
 numpy>=1.24.0
 
-# Database
-psycopg2-binary==2.9.9
+# Database - Python 3.13 compatible
+psycopg[binary]>=3.1.0  # psycopg3 is Python 3.13 compatible
 pgvector==0.2.5
 
 # FastAPI - Python 3.13 compatible

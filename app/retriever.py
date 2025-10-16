@@ -13,8 +13,8 @@ Purpose: Build a production-ready LangChain retriever that leverages:
 This is the CORE of the RAG system - it makes semantic search actually useful!
 """
 
-import psycopg2
-from psycopg2.extras import RealDictCursor
+import psycopg
+from psycopg.rows import dict_row
 from sentence_transformers import SentenceTransformer
 from typing import List, Dict, Any, Optional
 from dataclasses import dataclass
@@ -86,7 +86,7 @@ class SparkiiRetriever:
 
         # Connect to database
         print("🔄 Connecting to Supabase...")
-        self.conn = psycopg2.connect(SUPABASE_URL)
+        self.conn = psycopg.connect(SUPABASE_URL)
         print("✅ Connected to Supabase")
 
     def encode_query(self, query: str) -> List[float]:
@@ -121,7 +121,7 @@ class SparkiiRetriever:
         sql = self._build_search_sql(filters, include_context)
 
         # Execute search
-        cursor = self.conn.cursor(cursor_factory=RealDictCursor)
+        cursor = self.conn.cursor(row_factory=dict_row)
         cursor.execute(sql, {
             'query_embedding': query_embedding,
             'top_k': top_k,

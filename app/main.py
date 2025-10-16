@@ -251,27 +251,41 @@ async def ask(request: AskRequest):
             distance_threshold=0.8
         )
 
-        # Build context for LLM
+        # Build context for LLM with more details
         context_text = "\n\n".join([
-            f"[Message {i+1}] {r['role']}: {r['content'][:500]}"
+            f"""[Message {i+1}] ({r.get('conversation_title', 'Untitled')})
+Role: {r['role']}
+Content: {r['content'][:1000]}
+{f"Code Language: {r['code_language']}" if r.get('code_language') else ""}
+{f"Tools Used: {', '.join(r['tools_used'])}" if r.get('tools_used') else ""}
+{f"Technical Depth: {r['technical_depth']}" if r.get('technical_depth') else ""}"""
             for i, r in enumerate(context_results)
         ])
 
-        # Generate answer using OpenRouter
+        # Generate answer using OpenRouter (Claude 4.5 Haiku)
         response = openrouter_client.chat.completions.create(
-            model="anthropic/claude-3.5-haiku",
+            model="anthropic/claude-3.5-haiku-20250116",  # Latest Claude 4.5 Haiku
             messages=[
                 {
                     "role": "system",
-                    "content": "You are a helpful AI assistant answering questions based on conversation history. Use the provided context to answer accurately."
+                    "content": """You are Sparkii RAG, an AI assistant that searches through 2.5 years of conversation history to provide precise, actionable answers.
+
+RULES:
+1. Answer ONLY from the provided context - never make up information
+2. If the context contains code, show the ACTUAL code snippets
+3. If the context has specific commands or errors, include them verbatim
+4. Be specific: include file paths, function names, error messages, exact solutions
+5. If the context doesn't answer the question well, say "The conversations don't contain clear information about this" and explain what partial info you found
+6. Format code blocks with ```language syntax
+7. Cite which conversation the information came from"""
                 },
                 {
                     "role": "user",
-                    "content": f"Context from conversations:\n{context_text}\n\nQuestion: {request.question}\n\nAnswer based on the context:"
+                    "content": f"Context from conversations:\n{context_text}\n\nQuestion: {request.question}\n\nProvide a detailed answer with specific code, commands, or solutions from the context:"
                 }
             ],
-            temperature=0.3,
-            max_tokens=500
+            temperature=0.2,  # Lower temperature for more focused responses
+            max_tokens=800  # More tokens for detailed code examples
         )
 
         answer = response.choices[0].message.content

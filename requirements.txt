@@ -1,0 +1,29 @@
+## ==================================================================
+# SPARKII RAG: Python Dependencies
+# =================================================================
+
+# Core dependencies
+psycopg2-binary==2.9.9  # PostgreSQL adapter
+sentence-transformers==2.7.0  # Embedding generation
+torch>=2.5.0  # PyTorch (required by sentence-transformers) - Compatible with Python 3.13+
+tqdm==4.66.4  # Progress bars
+
+# LangChain ecosystem
+langchain==0.2.6
+langchain-community==0.2.6
+langchain-anthropic==0.1.20
+pgvector==0.2.5  # PostgreSQL vector extension Python client
+anthropic>=0.40.0  # Anthropic Claude API
+
+# FastAPI
+fastapi==0.111.0
+uvicorn[standard]==0.30.1
+pydantic==2.7.4
+pydantic-settings==2.3.4  # For BaseSettings
+python-multipart==0.0.9
+
+# OpenRouter / OpenAI client
+openai==1.10.0
+
+# Utilities
+python-dotenv==1.0.1

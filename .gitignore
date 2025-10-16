@@ -1,0 +1,15 @@
+__pycache__/
+*.pyc
+*.pyo
+*.log
+.env
+*.sqlite
+.DS_Store
+.vscode/
+*.egg-info/
+dist/
+build/
+fastapi.log
+ask_result.json
+test_ask.json
+venv/

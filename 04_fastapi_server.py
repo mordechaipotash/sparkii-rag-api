@@ -34,7 +34,7 @@ from pathlib import Path
 
 # Get the directory of this file for relative imports
 CURRENT_DIR = Path(__file__).parent.resolve()
-RAG_RETRIEVER_PATH = CURRENT_DIR / "03_rag_retriever.py"
+RAG_RETRIEVER_PATH = CURRENT_DIR / "03_rag_retriever_stella.py"
 
 # Dynamically import the rag_retriever module
 spec = importlib.util.spec_from_file_location("rag_retriever", str(RAG_RETRIEVER_PATH))

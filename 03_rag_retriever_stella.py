@@ -4,7 +4,7 @@ SPARKII RAG: LangChain Retriever with STELLA Embeddings
 ========================================================
 
 Purpose: Build a production-ready LangChain retriever with stella-en-1.5B-v5
-- Uses same model for query encoding as embedding generation
+- Uses sentence-transformers (same as embedding generation)
 - 1024-dimensional vectors (vs 384 for MiniLM)
 - MTEB rank #3 quality (vs #50+ for MiniLM)
 - Classification metadata filtering
@@ -19,12 +19,10 @@ Model caching:
 
 import psycopg2
 from psycopg2.extras import RealDictCursor
-import torch
-from transformers import AutoTokenizer, AutoModel
+from sentence_transformers import SentenceTransformer
 from typing import List, Dict, Any, Optional
 from dataclasses import dataclass
 from enum import Enum
-import numpy as np
 import os
 
 # ============================================================================
@@ -38,7 +36,7 @@ if not DATABASE_URL:
 SUPABASE_URL = DATABASE_URL
 
 # Stella model (same as embedding generation)
-MODEL_NAME = "dunzhang/stella_en_1.5B_v5"
+MODEL_NAME = "NovaSearch/stella_en_1.5B_v5"
 EMBEDDING_DIM = 1024
 
 # HuggingFace cache directory (Railway volume mount point)
@@ -90,236 +88,193 @@ class SparkiiRetriever:
     """
 
     def __init__(self):
-        # Load stella model
+        # Load stella model using sentence-transformers
         print(f"🔄 Loading stella model from {CACHE_DIR}...")
-        self.tokenizer = AutoTokenizer.from_pretrained(
+        self.model = SentenceTransformer(
             MODEL_NAME,
-            trust_remote_code=True,
-            cache_dir=CACHE_DIR
+            device='cpu',  # Railway uses CPU
+            cache_folder=CACHE_DIR
         )
-        self.model = AutoModel.from_pretrained(
-            MODEL_NAME,
-            trust_remote_code=True,
-            cache_dir=CACHE_DIR
-        )
-        self.model.eval()
-        print(f"✅ Stella model loaded: {MODEL_NAME}")
+        print(f"✅ Model loaded: {MODEL_NAME}")
+        print(f"   Embedding dimension: {self.model.get_sentence_embedding_dimension()}")
 
         # Connect to database
-        print("🔄 Connecting to Supabase...")
         self.conn = psycopg2.connect(SUPABASE_URL)
         print("✅ Connected to Supabase")
 
     def encode_query(self, query: str) -> List[float]:
         """Convert query to stella embedding vector (1024 dims)"""
-        inputs = self.tokenizer(
-            query,
-            return_tensors="pt",
-            truncation=True,
-            max_length=512,
-            padding=True
-        )
-        with torch.no_grad():
-            outputs = self.model(**inputs, use_cache=False)
-            embeddings = outputs.last_hidden_state.mean(dim=1)
-        return embeddings[0].tolist()
+        embedding = self.model.encode(query, convert_to_tensor=False)
+        return embedding.tolist()
 
     def search(
         self,
         query: str,
-        top_k: int = 10,
-        filters: Optional[RetrievalFilters] = None,
-        include_context: bool = True,
-        distance_threshold: float = 1.0
+        limit: int = 10,
+        filters: Optional[RetrievalFilters] = None
     ) -> List[Dict[str, Any]]:
         """
-        Search for relevant messages with optional filters
+        Semantic search with stella embeddings
 
         Args:
-            query: Natural language query
-            top_k: Number of results to return
-            filters: Metadata filters to apply
-            include_context: Include previous messages from conversation
-            distance_threshold: Maximum cosine distance (0-2, lower = more similar)
+            query: Natural language search query
+            limit: Max results to return
+            filters: Optional classification-based filters
 
         Returns:
-            List of dicts with message content, metadata, and similarity scores
+            List of matching messages with metadata and similarity scores
         """
-        # Encode query
+        # 1. Encode query
         query_embedding = self.encode_query(query)
 
-        # Build SQL with filters
-        where_clauses = []
-        params = []
+        # 2. Build WHERE clause from filters
+        where_conditions = ["m.embedding IS NOT NULL"]
+        params = [query_embedding]
 
         if filters:
             if filters.contains_code is not None:
-                where_clauses.append("contains_code = %s")
+                where_conditions.append("m.contains_code = %s")
                 params.append(filters.contains_code)
-
             if filters.code_language:
-                where_clauses.append("code_language = %s")
+                where_conditions.append("m.code_language = %s")
                 params.append(filters.code_language)
-
             if filters.user_intent:
-                where_clauses.append("user_intent = %s")
+                where_conditions.append("m.user_intent = %s")
                 params.append(filters.user_intent)
-
             if filters.technical_depth:
-                where_clauses.append("technical_depth = %s")
+                where_conditions.append("m.technical_depth = %s")
                 params.append(filters.technical_depth)
-
-            if filters.response_type:
-                where_clauses.append("response_type = %s")
-                params.append(filters.response_type)
-
             if filters.role:
-                where_clauses.append("role = %s")
+                where_conditions.append("m.role = %s")
                 params.append(filters.role)
-
             if filters.frustration_indicator is not None:
-                where_clauses.append("frustration_indicator = %s")
+                where_conditions.append("m.frustration_indicator = %s")
                 params.append(filters.frustration_indicator)
 
-            if filters.urgency_level:
-                where_clauses.append("urgency_level = %s")
-                params.append(filters.urgency_level)
+        where_clause = " AND ".join(where_conditions)
 
-            if filters.tools_used:
-                where_clauses.append("tools_used && %s")
-                params.append(filters.tools_used)
-
-            if filters.mcp_tools_used:
-                where_clauses.append("mcp_tools_used && %s")
-                params.append(filters.mcp_tools_used)
-
-        where_clause = " AND ".join(where_clauses) if where_clauses else "TRUE"
-
-        # Execute vector search
-        cursor = self.conn.cursor(cursor_factory=RealDictCursor)
-
-        sql = f"""
+        # 3. Execute vector search
+        query_sql = f"""
             SELECT
-                id,
-                conversation_id,
-                message_index,
-                role,
-                content,
-                contains_code,
-                code_language,
-                user_intent,
-                technical_depth,
-                response_type,
-                tools_used,
-                mcp_tools_used,
-                embedding <=> %s::vector AS distance
-            FROM message_embeddings
+                m.content,
+                m.role,
+                c.title,
+                c.conversation_id,
+                m.message_index,
+                m.user_intent,
+                m.technical_depth,
+                m.contains_code,
+                m.code_language,
+                m.tools_used,
+                m.mcp_tools_used,
+                m.embedding <=> %s::vector AS distance
+            FROM message_embeddings m
+            JOIN chat_histories c ON m.conversation_id = c.id
             WHERE {where_clause}
-            AND embedding IS NOT NULL
-            AND embedding <=> %s::vector < %s
-            ORDER BY embedding <=> %s::vector
+            ORDER BY distance ASC
             LIMIT %s
         """
 
-        # Params: [query_embedding for each <=> operator, filter params, distance_threshold, top_k]
-        all_params = [query_embedding] + params + [query_embedding, distance_threshold, query_embedding, top_k]
+        params.append(limit)
 
-        cursor.execute(sql, all_params)
+        cursor = self.conn.cursor(cursor_factory=RealDictCursor)
+        cursor.execute(query_sql, params)
         results = cursor.fetchall()
-
-        # Convert to list of dicts
-        output = []
-        for row in results:
-            result_dict = dict(row)
-
-            # Include conversation context if requested
-            if include_context:
-                context_cursor = self.conn.cursor(cursor_factory=RealDictCursor)
-                context_cursor.execute("""
-                    SELECT role, content, message_index
-                    FROM message_embeddings
-                    WHERE conversation_id = %s
-                    AND message_index < %s
-                    ORDER BY message_index DESC
-                    LIMIT 3
-                """, (row['conversation_id'], row['message_index']))
-
-                result_dict['previous_messages'] = list(context_cursor.fetchall())
-                context_cursor.close()
-
-            output.append(result_dict)
-
         cursor.close()
-        return output
 
-    def route_query(self, query: str) -> QueryType:
-        """
-        Determine query type for routing to specialized retrieval strategy
+        # 4. Convert distance to similarity score (0-100%)
+        for result in results:
+            result['similarity_score'] = 1 - result['distance']
+            result['match_percentage'] = round((1 - result['distance']) * 100, 1)
 
-        Simple heuristic-based routing (could be enhanced with LLM classification)
-        """
-        query_lower = query.lower()
+        return results
 
-        # Debugging queries
-        if any(word in query_lower for word in ['fix', 'fixed', 'solved', 'resolved', 'bug', 'error', 'issue']):
-            return QueryType.DEBUGGING
-
-        # Code search queries
-        if any(word in query_lower for word in ['code', 'implementation', 'function', 'class', 'snippet']):
-            return QueryType.CODE_SEARCH
-
-        # Workflow queries
-        if any(word in query_lower for word in ['how to', 'how do', 'how did', 'steps', 'process', 'workflow']):
-            return QueryType.WORKFLOW
-
-        # Error recovery queries
-        if any(word in query_lower for word in ['went wrong', 'failed', 'error', 'crash', 'broken']):
-            return QueryType.ERROR_RECOVERY
-
-        # Default to conceptual
-        return QueryType.CONCEPTUAL
-
-    def search_with_routing(
+    def get_conversation_context(
         self,
-        query: str,
-        top_k: int = 10
+        conversation_id: str,
+        message_index: int,
+        context_window: int = 5
     ) -> List[Dict[str, Any]]:
         """
-        Smart search that routes to appropriate retrieval strategy
+        Get surrounding messages from same conversation
 
-        Different query types get different filters and ranking
+        Args:
+            conversation_id: UUID of conversation
+            message_index: Index of target message
+            context_window: How many messages before/after to fetch
+
+        Returns:
+            List of messages in chronological order
         """
-        query_type = self.route_query(query)
+        cursor = self.conn.cursor(cursor_factory=RealDictCursor)
+        cursor.execute("""
+            SELECT
+                content,
+                role,
+                message_index,
+                user_intent,
+                tools_used,
+                mcp_tools_used
+            FROM message_embeddings
+            WHERE conversation_id = %s
+                AND message_index BETWEEN %s AND %s
+            ORDER BY message_index ASC
+        """, (
+            conversation_id,
+            message_index - context_window,
+            message_index + context_window
+        ))
 
-        if query_type == QueryType.DEBUGGING:
-            # Debugging: prioritize code + tools
-            filters = RetrievalFilters(
-                contains_code=True,
-                response_type="solution"
-            )
-            return self.search(query, top_k=top_k, filters=filters)
-
-        elif query_type == QueryType.CODE_SEARCH:
-            # Code search: only code messages
-            filters = RetrievalFilters(contains_code=True)
-            return self.search(query, top_k=top_k, filters=filters)
-
-        elif query_type == QueryType.WORKFLOW:
-            # Workflow: include context heavily
-            return self.search(query, top_k=top_k, include_context=True)
-
-        elif query_type == QueryType.ERROR_RECOVERY:
-            # Error recovery: prioritize frustration indicators
-            filters = RetrievalFilters(frustration_indicator=True)
-            return self.search(query, top_k=top_k, filters=filters)
-
-        else:
-            # Conceptual: no filters, semantic search only
-            return self.search(query, top_k=top_k)
+        results = cursor.fetchall()
+        cursor.close()
+        return results
 
     def close(self):
-        """Clean up database connection"""
-        self.conn.close()
+        """Close database connection"""
+        if self.conn:
+            self.conn.close()
+
+
+# ============================================================================
+# CONVENIENCE FUNCTIONS
+# ============================================================================
+
+def quick_search(query: str, limit: int = 5) -> List[Dict[str, Any]]:
+    """Quick search without filters (for testing)"""
+    retriever = SparkiiRetriever()
+    try:
+        results = retriever.search(query, limit=limit)
+        return results
+    finally:
+        retriever.close()
+
+
+def code_search(query: str, language: Optional[str] = None, limit: int = 5) -> List[Dict[str, Any]]:
+    """Search for code snippets only"""
+    filters = RetrievalFilters(
+        contains_code=True,
+        code_language=language
+    )
+    retriever = SparkiiRetriever()
+    try:
+        results = retriever.search(query, limit=limit, filters=filters)
+        return results
+    finally:
+        retriever.close()
+
+
+def debugging_search(query: str, limit: int = 5) -> List[Dict[str, Any]]:
+    """Search for debugging/error-related messages"""
+    filters = RetrievalFilters(
+        user_intent="troubleshooting",
+        frustration_indicator=True
+    )
+    retriever = SparkiiRetriever()
+    try:
+        results = retriever.search(query, limit=limit, filters=filters)
+        return results
+    finally:
+        retriever.close()
 
 
 # ============================================================================
@@ -327,33 +282,18 @@ class SparkiiRetriever:
 # ============================================================================
 
 if __name__ == "__main__":
-    print("\n" + "="*80)
-    print("SPARKII RAG: Stella Retriever Test")
-    print("="*80 + "\n")
+    import sys
 
-    # Initialize retriever
-    retriever = SparkiiRetriever()
+    if len(sys.argv) < 2:
+        print("Usage: python 03_rag_retriever_stella.py <query>")
+        sys.exit(1)
 
-    # Test queries
-    test_queries = [
-        "How did I fix pandas groupby performance issues?",
-        "Show me postgres connection pooling code",
-        "What is RAG and how does it work?",
-    ]
+    query = " ".join(sys.argv[1:])
+    print(f"\n🔍 Searching: {query}\n")
 
-    for query in test_queries:
-        print(f"\n{'='*80}")
-        print(f"🔍 Query: {query}")
-        print('='*80)
+    results = quick_search(query, limit=5)
 
-        results = retriever.search_with_routing(query, top_k=3)
-
-        for i, result in enumerate(results, 1):
-            print(f"\n[Result {i}] Distance: {result['distance']:.4f}")
-            print(f"Role: {result['role']}")
-            print(f"Content: {result['content'][:200]}...")
-            if result.get('code_language'):
-                print(f"Language: {result['code_language']}")
-
-    retriever.close()
-    print("\n✅ Done")
+    for i, result in enumerate(results, 1):
+        print(f"[{i}] {result['match_percentage']}% match | {result['role']} | {result['title']}")
+        print(f"    {result['content'][:200]}...")
+        print()

@@ -99,10 +99,7 @@ class SparkiiRetriever:
         print(f"   Embedding dimension: {self.model.get_sentence_embedding_dimension()}")
 
         # Store database URL for per-request connections
-        # Ensure sslmode is set for Supabase pooler
         self.db_url = SUPABASE_URL
-        if 'sslmode' not in self.db_url:
-            self.db_url += '?sslmode=require' if '?' not in self.db_url else '&sslmode=require'
 
     def encode_query(self, query: str) -> List[float]:
         """Convert query to stella embedding vector (1024 dims)"""
@@ -179,22 +176,20 @@ class SparkiiRetriever:
 
         params.append(limit)
 
-        # Create a fresh connection for this request
-        conn = psycopg.connect(self.db_url, autocommit=True)
-        try:
-            cursor = conn.cursor(row_factory=dict_row)
-            cursor.execute(query_sql, params)
-            results = list(cursor.fetchall())  # Convert to list to materialize results
-            cursor.close()
+        # Create a fresh connection for this request (matches upgrade_to_stella.py pattern)
+        conn = psycopg.connect(self.db_url)
+        cursor = conn.cursor(row_factory=dict_row)
+        cursor.execute(query_sql, params)
+        results = cursor.fetchall()
+        cursor.close()
+        conn.close()
 
-            # 4. Convert distance to similarity score (0-100%)
-            for result in results:
-                result['similarity_score'] = 1 - result['distance']
-                result['match_percentage'] = round((1 - result['distance']) * 100, 1)
+        # 4. Convert distance to similarity score (0-100%)
+        for result in results:
+            result['similarity_score'] = 1 - result['distance']
+            result['match_percentage'] = round((1 - result['distance']) * 100, 1)
 
-            return results
-        finally:
-            conn.close()
+        return results
 
     def get_conversation_context(
         self,
@@ -213,32 +208,30 @@ class SparkiiRetriever:
         Returns:
             List of messages in chronological order
         """
-        conn = psycopg.connect(self.db_url, autocommit=True)
-        try:
-            cursor = conn.cursor(row_factory=dict_row)
-            cursor.execute("""
-                SELECT
-                    content,
-                    role,
-                    message_index,
-                    user_intent,
-                    tools_used,
-                    mcp_tools_used
-                FROM message_embeddings
-                WHERE conversation_id = %s
-                    AND message_index BETWEEN %s AND %s
-                ORDER BY message_index ASC
-            """, (
-                conversation_id,
-                message_index - context_window,
-                message_index + context_window
-            ))
+        conn = psycopg.connect(self.db_url)
+        cursor = conn.cursor(row_factory=dict_row)
+        cursor.execute("""
+            SELECT
+                content,
+                role,
+                message_index,
+                user_intent,
+                tools_used,
+                mcp_tools_used
+            FROM message_embeddings
+            WHERE conversation_id = %s
+                AND message_index BETWEEN %s AND %s
+            ORDER BY message_index ASC
+        """, (
+            conversation_id,
+            message_index - context_window,
+            message_index + context_window
+        ))
 
-            results = list(cursor.fetchall())
-            cursor.close()
-            return results
-        finally:
-            conn.close()
+        results = cursor.fetchall()
+        cursor.close()
+        conn.close()
+        return results
 
 
 # ============================================================================

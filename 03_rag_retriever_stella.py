@@ -185,13 +185,19 @@ class SparkiiRetriever:
 
         params.append(result_limit)
 
-        # Create a fresh connection for this request (matches upgrade_to_stella.py pattern)
-        conn = psycopg.connect(self.db_url)
-        cursor = conn.cursor(row_factory=dict_row)
-        cursor.execute(query_sql, params)
-        results = cursor.fetchall()
-        cursor.close()
-        conn.close()
+        # Create a fresh connection for this request
+        try:
+            conn = psycopg.connect(self.db_url, autocommit=True)
+            with conn.cursor(row_factory=dict_row) as cursor:
+                cursor.execute(query_sql, params)
+                results = cursor.fetchall()
+        except Exception as e:
+            print(f"Database error: {e}")
+            print(f"Connection string (masked): {self.db_url[:50]}...")
+            raise
+        finally:
+            if 'conn' in locals():
+                conn.close()
 
         # 4. Convert distance to similarity score (0-100%)
         for result in results:

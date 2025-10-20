@@ -99,7 +99,21 @@ class SparkiiRetriever:
         print(f"   Embedding dimension: {self.model.get_sentence_embedding_dimension()}")
 
         # Store database URL for per-request connections
+        # For Supabase: Use direct connection (port 6543 with pgbouncer in transaction mode)
+        # This avoids "connection already closed" errors with pooler
         self.db_url = SUPABASE_URL
+        if self.db_url and 'pooler.supabase.com:5432' in self.db_url:
+            # Change from session pooler (:5432) to transaction pooler (:6543)
+            self.db_url = self.db_url.replace(':5432', ':6543')
+            print("🔄 Switched to Supabase transaction pooler (port 6543)")
+
+        # Debug: Show connection details (masked password)
+        if self.db_url:
+            import re
+            masked_url = re.sub(r'://([^:]+):([^@]+)@', r'://\1:***@', self.db_url)
+            print(f"📊 Database URL: {masked_url}")
+        else:
+            print("⚠️  Warning: DATABASE_URL is not set!")
 
     def encode_query(self, query: str) -> List[float]:
         """Convert query to stella embedding vector (1024 dims)"""

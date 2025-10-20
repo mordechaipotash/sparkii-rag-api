@@ -138,11 +138,14 @@ class StatsResponse(BaseModel):
 
 @app.on_event("startup")
 async def startup():
-    """Initialize retriever on startup"""
+    """API startup - retriever loads lazily on first request"""
     global retriever
     print("🚀 Starting Sparkii RAG API...")
-    retriever = SparkiiRetriever()
-    print("✅ Retriever initialized!")
+    print("⏳ Retriever will initialize on first search request")
+    # Don't load stella model on startup - it takes 2-3 minutes
+    # Load it lazily on first /search or /ask request
+    retriever = None
+    print("✅ API ready! (model loads on first request)")
 
 @app.on_event("shutdown")
 async def shutdown():
@@ -198,8 +201,17 @@ async def search(request: SearchRequest):
     }
     ```
     """
+    global retriever
+
+    # Lazy initialization: load stella model on first request
     if not retriever:
-        raise HTTPException(status_code=503, detail="Retriever not initialized")
+        print("⏳ First search request - loading stella model (this may take 2-3 minutes)...")
+        try:
+            retriever = SparkiiRetriever()
+            print("✅ Retriever initialized successfully!")
+        except Exception as e:
+            print(f"❌ Failed to initialize retriever: {e}")
+            raise HTTPException(status_code=503, detail=f"Failed to initialize retriever: {str(e)}")
 
     try:
         # Build filters
@@ -298,8 +310,17 @@ async def ask(request: AskRequest):
     }
     ```
     """
+    global retriever
+
+    # Lazy initialization: load stella model on first request
     if not retriever:
-        raise HTTPException(status_code=503, detail="Retriever not initialized")
+        print("⏳ First ask request - loading stella model (this may take 2-3 minutes)...")
+        try:
+            retriever = SparkiiRetriever()
+            print("✅ Retriever initialized successfully!")
+        except Exception as e:
+            print(f"❌ Failed to initialize retriever: {e}")
+            raise HTTPException(status_code=503, detail=f"Failed to initialize retriever: {str(e)}")
 
     try:
         # Build filters

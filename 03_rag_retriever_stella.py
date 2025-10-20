@@ -99,7 +99,10 @@ class SparkiiRetriever:
         print(f"   Embedding dimension: {self.model.get_sentence_embedding_dimension()}")
 
         # Store database URL for per-request connections
+        # Ensure sslmode is set for Supabase pooler
         self.db_url = SUPABASE_URL
+        if 'sslmode' not in self.db_url:
+            self.db_url += '?sslmode=require' if '?' not in self.db_url else '&sslmode=require'
 
     def encode_query(self, query: str) -> List[float]:
         """Convert query to stella embedding vector (1024 dims)"""

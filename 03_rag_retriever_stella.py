@@ -98,9 +98,8 @@ class SparkiiRetriever:
         print(f"✅ Model loaded: {MODEL_NAME}")
         print(f"   Embedding dimension: {self.model.get_sentence_embedding_dimension()}")
 
-        # Connect to database
-        self.conn = psycopg2.connect(SUPABASE_URL)
-        print("✅ Connected to Supabase")
+        # Store database URL for per-request connections
+        self.db_url = SUPABASE_URL
 
     def encode_query(self, query: str) -> List[float]:
         """Convert query to stella embedding vector (1024 dims)"""
@@ -177,17 +176,22 @@ class SparkiiRetriever:
 
         params.append(limit)
 
-        cursor = self.conn.cursor(cursor_factory=RealDictCursor)
-        cursor.execute(query_sql, params)
-        results = cursor.fetchall()
-        cursor.close()
+        # Create a fresh connection for this request
+        conn = psycopg2.connect(self.db_url)
+        try:
+            cursor = conn.cursor(cursor_factory=RealDictCursor)
+            cursor.execute(query_sql, params)
+            results = cursor.fetchall()
+            cursor.close()
 
-        # 4. Convert distance to similarity score (0-100%)
-        for result in results:
-            result['similarity_score'] = 1 - result['distance']
-            result['match_percentage'] = round((1 - result['distance']) * 100, 1)
+            # 4. Convert distance to similarity score (0-100%)
+            for result in results:
+                result['similarity_score'] = 1 - result['distance']
+                result['match_percentage'] = round((1 - result['distance']) * 100, 1)
 
-        return results
+            return results
+        finally:
+            conn.close()
 
     def get_conversation_context(
         self,
@@ -206,33 +210,32 @@ class SparkiiRetriever:
         Returns:
             List of messages in chronological order
         """
-        cursor = self.conn.cursor(cursor_factory=RealDictCursor)
-        cursor.execute("""
-            SELECT
-                content,
-                role,
-                message_index,
-                user_intent,
-                tools_used,
-                mcp_tools_used
-            FROM message_embeddings
-            WHERE conversation_id = %s
-                AND message_index BETWEEN %s AND %s
-            ORDER BY message_index ASC
-        """, (
-            conversation_id,
-            message_index - context_window,
-            message_index + context_window
-        ))
+        conn = psycopg2.connect(self.db_url)
+        try:
+            cursor = conn.cursor(cursor_factory=RealDictCursor)
+            cursor.execute("""
+                SELECT
+                    content,
+                    role,
+                    message_index,
+                    user_intent,
+                    tools_used,
+                    mcp_tools_used
+                FROM message_embeddings
+                WHERE conversation_id = %s
+                    AND message_index BETWEEN %s AND %s
+                ORDER BY message_index ASC
+            """, (
+                conversation_id,
+                message_index - context_window,
+                message_index + context_window
+            ))
 
-        results = cursor.fetchall()
-        cursor.close()
-        return results
-
-    def close(self):
-        """Close database connection"""
-        if self.conn:
-            self.conn.close()
+            results = cursor.fetchall()
+            cursor.close()
+            return results
+        finally:
+            conn.close()
 
 
 # ============================================================================
@@ -242,11 +245,7 @@ class SparkiiRetriever:
 def quick_search(query: str, limit: int = 5) -> List[Dict[str, Any]]:
     """Quick search without filters (for testing)"""
     retriever = SparkiiRetriever()
-    try:
-        results = retriever.search(query, limit=limit)
-        return results
-    finally:
-        retriever.close()
+    return retriever.search(query, limit=limit)
 
 
 def code_search(query: str, language: Optional[str] = None, limit: int = 5) -> List[Dict[str, Any]]:
@@ -256,11 +255,7 @@ def code_search(query: str, language: Optional[str] = None, limit: int = 5) -> L
         code_language=language
     )
     retriever = SparkiiRetriever()
-    try:
-        results = retriever.search(query, limit=limit, filters=filters)
-        return results
-    finally:
-        retriever.close()
+    return retriever.search(query, limit=limit, filters=filters)
 
 
 def debugging_search(query: str, limit: int = 5) -> List[Dict[str, Any]]:
@@ -270,11 +265,7 @@ def debugging_search(query: str, limit: int = 5) -> List[Dict[str, Any]]:
         frustration_indicator=True
     )
     retriever = SparkiiRetriever()
-    try:
-        results = retriever.search(query, limit=limit, filters=filters)
-        return results
-    finally:
-        retriever.close()
+    return retriever.search(query, limit=limit, filters=filters)
 
 
 # ============================================================================

@@ -212,12 +212,12 @@ class SparkiiRetriever:
                 response_type,
                 tools_used,
                 mcp_tools_used,
-                embedding_stella <=> %s::vector AS distance
+                embedding <=> %s::vector AS distance
             FROM message_embeddings
             WHERE {where_clause}
-            AND embedding_stella IS NOT NULL
-            AND embedding_stella <=> %s::vector < %s
-            ORDER BY embedding_stella <=> %s::vector
+            AND embedding IS NOT NULL
+            AND embedding <=> %s::vector < %s
+            ORDER BY embedding <=> %s::vector
             LIMIT %s
         """
 

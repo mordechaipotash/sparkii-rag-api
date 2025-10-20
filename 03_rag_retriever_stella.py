@@ -186,25 +186,27 @@ class SparkiiRetriever:
         params.append(result_limit)
 
         # Create a fresh connection for this request
+        conn = None
         try:
-            conn = psycopg.connect(self.db_url, autocommit=True)
-            with conn.cursor(row_factory=dict_row) as cursor:
-                cursor.execute(query_sql, params)
-                results = cursor.fetchall()
+            conn = psycopg.connect(self.db_url)
+            cursor = conn.cursor(row_factory=dict_row)
+            cursor.execute(query_sql, params)
+            results = cursor.fetchall()
+            cursor.close()
+
+            # Convert distance to similarity score (0-100%)
+            for result in results:
+                result['similarity_score'] = 1 - result['distance']
+                result['match_percentage'] = round((1 - result['distance']) * 100, 1)
+
+            return results
         except Exception as e:
             print(f"Database error: {e}")
             print(f"Connection string (masked): {self.db_url[:50]}...")
             raise
         finally:
-            if 'conn' in locals():
+            if conn:
                 conn.close()
-
-        # 4. Convert distance to similarity score (0-100%)
-        for result in results:
-            result['similarity_score'] = 1 - result['distance']
-            result['match_percentage'] = round((1 - result['distance']) * 100, 1)
-
-        return results
 
     def get_conversation_context(
         self,

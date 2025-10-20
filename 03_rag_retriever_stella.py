@@ -109,20 +109,29 @@ class SparkiiRetriever:
     def search(
         self,
         query: str,
-        limit: int = 10,
-        filters: Optional[RetrievalFilters] = None
+        top_k: int = 10,
+        limit: int = None,  # Backward compatibility alias
+        filters: Optional[RetrievalFilters] = None,
+        include_context: bool = False,
+        distance_threshold: float = None
     ) -> List[Dict[str, Any]]:
         """
         Semantic search with stella embeddings
 
         Args:
             query: Natural language search query
-            limit: Max results to return
+            top_k: Max results to return (default: 10)
+            limit: Alias for top_k (backward compatibility)
             filters: Optional classification-based filters
+            include_context: Not yet implemented
+            distance_threshold: Not yet implemented
 
         Returns:
             List of matching messages with metadata and similarity scores
         """
+        # Use limit if provided (backward compat), otherwise use top_k
+        result_limit = limit if limit is not None else top_k
+
         # 1. Encode query
         query_embedding = self.encode_query(query)
 
@@ -174,7 +183,7 @@ class SparkiiRetriever:
             LIMIT %s
         """
 
-        params.append(limit)
+        params.append(result_limit)
 
         # Create a fresh connection for this request (matches upgrade_to_stella.py pattern)
         conn = psycopg.connect(self.db_url)

@@ -17,8 +17,8 @@ Model caching:
 - Railway: Use volume mount at /app/.cache to persist model
 """
 
-import psycopg2
-from psycopg2.extras import RealDictCursor
+import psycopg
+from psycopg.rows import dict_row
 from sentence_transformers import SentenceTransformer
 from typing import List, Dict, Any, Optional
 from dataclasses import dataclass
@@ -177,21 +177,17 @@ class SparkiiRetriever:
         params.append(limit)
 
         # Create a fresh connection for this request
-        conn = psycopg2.connect(self.db_url)
-        try:
-            cursor = conn.cursor(cursor_factory=RealDictCursor)
-            cursor.execute(query_sql, params)
-            results = cursor.fetchall()
-            cursor.close()
+        with psycopg.connect(self.db_url) as conn:
+            with conn.cursor(row_factory=dict_row) as cursor:
+                cursor.execute(query_sql, params)
+                results = cursor.fetchall()
 
-            # 4. Convert distance to similarity score (0-100%)
-            for result in results:
-                result['similarity_score'] = 1 - result['distance']
-                result['match_percentage'] = round((1 - result['distance']) * 100, 1)
+                # 4. Convert distance to similarity score (0-100%)
+                for result in results:
+                    result['similarity_score'] = 1 - result['distance']
+                    result['match_percentage'] = round((1 - result['distance']) * 100, 1)
 
-            return results
-        finally:
-            conn.close()
+                return results
 
     def get_conversation_context(
         self,
@@ -210,32 +206,27 @@ class SparkiiRetriever:
         Returns:
             List of messages in chronological order
         """
-        conn = psycopg2.connect(self.db_url)
-        try:
-            cursor = conn.cursor(cursor_factory=RealDictCursor)
-            cursor.execute("""
-                SELECT
-                    content,
-                    role,
-                    message_index,
-                    user_intent,
-                    tools_used,
-                    mcp_tools_used
-                FROM message_embeddings
-                WHERE conversation_id = %s
-                    AND message_index BETWEEN %s AND %s
-                ORDER BY message_index ASC
-            """, (
-                conversation_id,
-                message_index - context_window,
-                message_index + context_window
-            ))
+        with psycopg.connect(self.db_url) as conn:
+            with conn.cursor(row_factory=dict_row) as cursor:
+                cursor.execute("""
+                    SELECT
+                        content,
+                        role,
+                        message_index,
+                        user_intent,
+                        tools_used,
+                        mcp_tools_used
+                    FROM message_embeddings
+                    WHERE conversation_id = %s
+                        AND message_index BETWEEN %s AND %s
+                    ORDER BY message_index ASC
+                """, (
+                    conversation_id,
+                    message_index - context_window,
+                    message_index + context_window
+                ))
 
-            results = cursor.fetchall()
-            cursor.close()
-            return results
-        finally:
-            conn.close()
+                return cursor.fetchall()
 
 
 # ============================================================================

@@ -43,6 +43,10 @@ EMBEDDING_DIM = 1024
 # HuggingFace cache directory (Railway volume mount point)
 CACHE_DIR = os.getenv("HF_HOME", os.path.expanduser("~/.cache/huggingface"))
 
+# Quality filters to remove noise from short messages
+MIN_CONTENT_LENGTH = 150  # Filter messages <150 chars (removes 31% low-quality data)
+MIN_SIMILARITY_SCORE = 0.97  # Only return results ≥97% similarity (vs default 90%)
+
 # ============================================================================
 # QUERY TYPES (for routing)
 # ============================================================================
@@ -158,6 +162,9 @@ class SparkiiRetriever:
         where_conditions = ["m.embedding IS NOT NULL"]
         params = [query_embedding]
 
+        # QUALITY FILTER 1: Remove short messages (noise reduction)
+        where_conditions.append(f"LENGTH(m.content) >= {MIN_CONTENT_LENGTH}")
+
         if filters:
             if filters.contains_code is not None:
                 where_conditions.append("m.contains_code = %s")
@@ -217,7 +224,10 @@ class SparkiiRetriever:
                         result = dict(row)
                         result['similarity_score'] = 1 - result['distance']
                         result['match_percentage'] = round((1 - result['distance']) * 100, 1)
-                        results.append(result)
+
+                        # QUALITY FILTER 2: Only return high-confidence matches (≥97%)
+                        if result['similarity_score'] >= MIN_SIMILARITY_SCORE:
+                            results.append(result)
 
                     return results
         except Exception as e:

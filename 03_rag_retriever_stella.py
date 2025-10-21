@@ -45,7 +45,7 @@ CACHE_DIR = os.getenv("HF_HOME", os.path.expanduser("~/.cache/huggingface"))
 
 # Quality filters to remove noise from short messages
 MIN_CONTENT_LENGTH = 150  # Filter messages <150 chars (removes 31% low-quality data)
-MIN_SIMILARITY_SCORE = 0.97  # Only return results ≥97% similarity (vs default 90%)
+MIN_SIMILARITY_SCORE = 0.96  # Only return results ≥96% similarity (96.8% = good match, <94% = noise)
 
 # ============================================================================
 # QUERY TYPES (for routing)

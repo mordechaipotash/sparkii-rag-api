@@ -12,7 +12,8 @@ numpy>=1.24.0
 
 # Database - Python 3.13 compatible
 psycopg[binary]>=3.1.0  # psycopg3 is Python 3.13 compatible
-psycopg2-binary>=2.9.9  # Legacy psycopg2 for 03_rag_retriever.py
+psycopg-pool>=3.2.0     # Connection pooling for efficient database access
+psycopg2-binary>=2.9.9  # Legacy psycopg2 for migration scripts only
 pgvector==0.2.5
 
 # FastAPI - Python 3.13 compatible

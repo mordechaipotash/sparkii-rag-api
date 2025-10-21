@@ -23,6 +23,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from typing import List, Dict, Any, Optional
 from datetime import datetime
+from contextlib import asynccontextmanager
 import uvicorn
 from openai import OpenAI
 import os
@@ -47,23 +48,8 @@ RetrievalFilters = rag_retriever.RetrievalFilters
 QueryType = rag_retriever.QueryType
 
 # ============================================================================
-# FASTAPI APP
+# FASTAPI APP WITH LIFESPAN
 # ============================================================================
-
-app = FastAPI(
-    title="Sparkii RAG API",
-    description="Semantic search over 255K AI conversation messages",
-    version="1.0.0"
-)
-
-# CORS - allow all origins (adjust for production)
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
 
 # Global retriever instance
 retriever: Optional[SparkiiRetriever] = None
@@ -76,6 +62,45 @@ if not OPENROUTER_API_KEY:
 openrouter_client = OpenAI(
     base_url="https://openrouter.ai/api/v1",
     api_key=OPENROUTER_API_KEY
+)
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Manage application lifespan - startup and shutdown"""
+    global retriever
+
+    # Startup
+    print("🚀 Starting Sparkii RAG API...")
+    print("⏳ Retriever will initialize on first search request")
+    # Don't load stella model on startup - it takes 2-3 minutes
+    # Load it lazily on first /search or /ask request
+    retriever = None
+    print("✅ API ready! (model loads on first request)")
+
+    yield  # Application runs here
+
+    # Shutdown
+    print("🔄 Shutting down Sparkii RAG API...")
+    if retriever:
+        print("📊 Closing connection pool...")
+        retriever.close()
+        print("✅ Connection pool closed")
+    print("👋 Sparkii RAG API stopped")
+
+app = FastAPI(
+    title="Sparkii RAG API",
+    description="Semantic search over 255K AI conversation messages",
+    version="1.0.0",
+    lifespan=lifespan
+)
+
+# CORS - allow all origins (adjust for production)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # ============================================================================
@@ -131,29 +156,6 @@ class StatsResponse(BaseModel):
     total_conversations: int
     messages_with_code: int
     average_confidence: float
-
-# ============================================================================
-# STARTUP/SHUTDOWN
-# ============================================================================
-
-@app.on_event("startup")
-async def startup():
-    """API startup - retriever loads lazily on first request"""
-    global retriever
-    print("🚀 Starting Sparkii RAG API...")
-    print("⏳ Retriever will initialize on first search request")
-    # Don't load stella model on startup - it takes 2-3 minutes
-    # Load it lazily on first /search or /ask request
-    retriever = None
-    print("✅ API ready! (model loads on first request)")
-
-@app.on_event("shutdown")
-async def shutdown():
-    """Clean up on shutdown"""
-    global retriever
-    if retriever:
-        retriever.close()
-    print("👋 Sparkii RAG API stopped")
 
 # ============================================================================
 # ENDPOINTS

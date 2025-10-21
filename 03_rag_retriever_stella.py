@@ -19,6 +19,7 @@ Model caching:
 
 import psycopg
 from psycopg.rows import dict_row
+from psycopg_pool import ConnectionPool
 from sentence_transformers import SentenceTransformer
 from typing import List, Dict, Any, Optional
 from dataclasses import dataclass
@@ -98,22 +99,26 @@ class SparkiiRetriever:
         print(f"✅ Model loaded: {MODEL_NAME}")
         print(f"   Embedding dimension: {self.model.get_sentence_embedding_dimension()}")
 
-        # Store database URL for per-request connections
-        # For Supabase: Use direct connection (port 6543 with pgbouncer in transaction mode)
-        # This avoids "connection already closed" errors with pooler
-        self.db_url = SUPABASE_URL
-        if self.db_url and 'pooler.supabase.com:5432' in self.db_url:
-            # Change from session pooler (:5432) to transaction pooler (:6543)
-            self.db_url = self.db_url.replace(':5432', ':6543')
-            print("🔄 Switched to Supabase transaction pooler (port 6543)")
+        # Initialize connection pool for efficient database access
+        if not SUPABASE_URL:
+            raise ValueError("DATABASE_URL not set!")
 
-        # Debug: Show connection details (masked password)
-        if self.db_url:
-            import re
-            masked_url = re.sub(r'://([^:]+):([^@]+)@', r'://\1:***@', self.db_url)
-            print(f"📊 Database URL: {masked_url}")
-        else:
-            print("⚠️  Warning: DATABASE_URL is not set!")
+        # Show masked connection string
+        import re
+        masked_url = re.sub(r'://([^:]+):([^@]+)@', r'://\1:***@', SUPABASE_URL)
+        print(f"📊 Database: {masked_url}")
+
+        # Create connection pool (Railway-optimized settings)
+        print("🔄 Initializing connection pool...")
+        self.pool = ConnectionPool(
+            SUPABASE_URL,
+            min_size=2,      # Keep 2 connections warm
+            max_size=10,     # Allow up to 10 concurrent connections
+            timeout=30,      # 30 second connection timeout
+            max_idle=300,    # Close idle connections after 5 minutes
+            max_lifetime=3600  # Recycle connections after 1 hour
+        )
+        print("✅ Connection pool ready")
 
     def encode_query(self, query: str) -> List[float]:
         """Convert query to stella embedding vector (1024 dims)"""
@@ -199,46 +204,25 @@ class SparkiiRetriever:
 
         params.append(result_limit)
 
-        # Create a fresh connection for this request
-        conn = None
-        cursor = None
+        # Use connection pool for efficient database access
         try:
-            conn = psycopg.connect(self.db_url)
-            cursor = conn.cursor(row_factory=dict_row)
-            cursor.execute(query_sql, params)
-            # Materialize results immediately before closing cursor
-            raw_results = cursor.fetchall()
+            with self.pool.connection() as conn:
+                with conn.cursor(row_factory=dict_row) as cursor:
+                    cursor.execute(query_sql, params)
+                    raw_results = cursor.fetchall()
 
-            # Close cursor and connection before processing results
-            cursor.close()
-            cursor = None
-            conn.close()
-            conn = None
+                    # Convert to regular Python dicts and add similarity scores
+                    results = []
+                    for row in raw_results:
+                        result = dict(row)
+                        result['similarity_score'] = 1 - result['distance']
+                        result['match_percentage'] = round((1 - result['distance']) * 100, 1)
+                        results.append(result)
 
-            # Convert to regular Python dicts and add similarity scores
-            results = []
-            for row in raw_results:
-                result = dict(row)
-                result['similarity_score'] = 1 - result['distance']
-                result['match_percentage'] = round((1 - result['distance']) * 100, 1)
-                results.append(result)
-
-            return results
+                    return results
         except Exception as e:
             print(f"Database error: {e}")
-            print(f"Connection string (masked): {self.db_url[:50]}...")
             raise
-        finally:
-            if cursor:
-                try:
-                    cursor.close()
-                except:
-                    pass
-            if conn:
-                try:
-                    conn.close()
-                except:
-                    pass
 
     def get_conversation_context(
         self,
@@ -257,30 +241,30 @@ class SparkiiRetriever:
         Returns:
             List of messages in chronological order
         """
-        conn = psycopg.connect(self.db_url)
-        cursor = conn.cursor(row_factory=dict_row)
-        cursor.execute("""
-            SELECT
-                content,
-                role,
-                message_index,
-                user_intent,
-                tools_used,
-                mcp_tools_used
-            FROM message_embeddings
-            WHERE conversation_id = %s
-                AND message_index BETWEEN %s AND %s
-            ORDER BY message_index ASC
-        """, (
-            conversation_id,
-            message_index - context_window,
-            message_index + context_window
-        ))
+        with self.pool.connection() as conn:
+            with conn.cursor(row_factory=dict_row) as cursor:
+                cursor.execute("""
+                    SELECT
+                        content,
+                        role,
+                        message_index,
+                        user_intent,
+                        tools_used,
+                        mcp_tools_used
+                    FROM message_embeddings
+                    WHERE conversation_id = %s
+                        AND message_index BETWEEN %s AND %s
+                    ORDER BY message_index ASC
+                """, (
+                    conversation_id,
+                    message_index - context_window,
+                    message_index + context_window
+                ))
+                return cursor.fetchall()
 
-        results = cursor.fetchall()
-        cursor.close()
-        conn.close()
-        return results
+    def close(self):
+        """Close connection pool (call during application shutdown)"""
+        self.pool.close()
 
 
 # ============================================================================

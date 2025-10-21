@@ -241,14 +241,11 @@ async def search(request: SearchRequest):
             distance_threshold=request.distance_threshold
         )
 
-        # Determine query type
-        query_type = retriever.route_query(request.query).value
-
         return SearchResponse(
             query=request.query,
             results=results,
             total=len(results),
-            query_type=query_type
+            query_type=None  # Query routing is optional
         )
 
     except Exception as e:
@@ -257,10 +254,7 @@ async def search(request: SearchRequest):
 @app.post("/search/smart", response_model=SearchResponse)
 async def smart_search(request: SearchRequest):
     """
-    Smart search with automatic query routing
-
-    This endpoint automatically determines the best retrieval strategy
-    based on query analysis (debugging, code, conceptual, etc.)
+    Smart search (currently same as regular search)
 
     Example:
     ```
@@ -271,27 +265,8 @@ async def smart_search(request: SearchRequest):
     }
     ```
     """
-    if not retriever:
-        raise HTTPException(status_code=503, detail="Retriever not initialized")
-
-    try:
-        # Use smart routing
-        results = retriever.search_with_routing(
-            query=request.query,
-            top_k=request.top_k
-        )
-
-        query_type = retriever.route_query(request.query).value
-
-        return SearchResponse(
-            query=request.query,
-            results=results,
-            total=len(results),
-            query_type=query_type
-        )
-
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Search failed: {str(e)}")
+    # For now, use the regular search endpoint
+    return await search(request)
 
 @app.post("/ask", response_model=AskResponse)
 async def ask(request: AskRequest):
@@ -341,10 +316,11 @@ async def ask(request: AskRequest):
                 urgency_level=request.filters.get('urgency_level')
             )
 
-        # Use smart routing for better retrieval
-        results = retriever.search_with_routing(
+        # Execute search
+        results = retriever.search(
             query=request.question,
-            top_k=request.top_k
+            top_k=request.top_k,
+            filters=filters
         )
 
         # If no results found, return early
